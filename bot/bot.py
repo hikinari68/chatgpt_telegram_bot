@@ -132,15 +132,10 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
     if not db.check_if_user_exists(user.id):
         db.add_new_user(
             user.id,
-            update.message.chat_id,
             username=user.username,
             first_name=user.first_name,
             last_name=user.last_name
         )
-        db.start_new_dialog(user.id)
-
-    if db.get_user_attribute(user.id, "current_dialog_id") is None:
-        db.start_new_dialog(user.id)
 
     if user.id not in user_semaphores:
         user_semaphores[user.id] = asyncio.Semaphore(1)
@@ -191,9 +186,11 @@ async def is_bot_mentioned(update: Update, context: CallbackContext):
 async def start_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.start_new_dialog(user_id)
+    db.start_new_dialog(user_id, chat_id, message_thread_id)
 
     reply_text = "Hi! I'm <b>ChatGPT</b> bot implemented with OpenAI API 🤖\n\n"
     reply_text += HELP_MESSAGE
@@ -227,22 +224,28 @@ async def retry_handle(update: Update, context: CallbackContext):
         return
 
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
+    dialog_messages = db.get_dialog_messages(
+        chat_id, message_thread_id)
     if len(dialog_messages) == 0:
         await update.message.reply_text("No message to retry 🤷‍♂️")
         return
 
     last_dialog_message = dialog_messages.pop()
     # last message was removed from the context
-    db.set_dialog_messages(user_id, dialog_messages, dialog_id=None)
+    db.set_dialog_messages(dialog_messages, user_id,
+                           chat_id,  message_thread_id)
 
     await message_handle(update, context, message=last_dialog_message["user"])
 
 
 async def _vision_message_handle_fn(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
     current_model = db.get_user_attribute(user_id, "current_model")
 
     if not config.models["info"][current_model].get("vision", False):
@@ -276,7 +279,7 @@ async def _vision_message_handle_fn(update: Update, context: CallbackContext):
         # send typing action
         await update.message.chat.send_action(action="typing")
 
-        dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
+        dialog_messages = db.get_dialog_messages(chat_id, message_thread_id)
 
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
         if config.enable_message_streaming:
@@ -337,10 +340,11 @@ async def _vision_message_handle_fn(update: Update, context: CallbackContext):
                 {"type": "text", "text": message}], "bot": answer, "date": datetime.now()}
 
         db.set_dialog_messages(
-            user_id,
             db.get_dialog_messages(
-                user_id, dialog_id=None) + [new_dialog_message],
-            dialog_id=None
+                chat_id, message_thread_id) + [new_dialog_message],
+            user_id,
+            chat_id,
+            message_thread_id
         )
 
         db.update_n_used_tokens(user_id, current_model,
@@ -391,6 +395,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
         return
 
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
     if chat_mode == "artist":
@@ -413,7 +419,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
                 await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!", parse_mode=ParseMode.HTML)
                 return
 
-            dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
+            dialog_messages = db.get_dialog_messages(
+                chat_id, message_thread_id)
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
             if config.enable_message_streaming:
@@ -449,10 +456,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
                 {"type": "text", "text": _message}], "bot": answer, "date": datetime.now()}
 
             db.set_dialog_messages(
-                user_id,
                 db.get_dialog_messages(
-                    user_id, dialog_id=None) + [new_dialog_message],
-                dialog_id=None
+                    chat_id, message_thread_id) + [new_dialog_message],
+                user_id,
+                chat_id,
+                message_thread_id
             )
 
             db.update_n_used_tokens(
@@ -595,11 +603,25 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     db.set_user_attribute(user_id, "current_model",
                           config.models["available_text_models"][0])
 
-    db.start_new_dialog(user_id)
-    await update.message.reply_text("Starting new dialog ✅")
+    if update.message.chat.type == "private":
+        forum_topic = await context.bot.create_forum_topic(update.message.chat_id, "New Chat")
+        message_thread_id = forum_topic.message_thread_id
+        db.start_new_dialog(user_id, update.message.chat_id, message_thread_id)
+    elif update.message.chat.type == "supergroup":
+        try:
+            forum_topic = await context.bot.create_forum_topic(update.message.chat_id, "New Chat")
+            message_thread_id = forum_topic.message_thread_id
+            db.start_new_dialog(
+                user_id, update.message.chat_id, message_thread_id)
+        except Exception as e:
+            db.start_new_dialog(user_id, update.message.chat_id)
+            await update.message.reply_text("Starting new dialog ✅")
+    else:
+        db.start_new_dialog(user_id, update.message.chat_id)
+        await update.message.reply_text("Starting new dialog ✅")
 
-    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
-    await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
+        chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+        await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
 async def cancel_handle(update: Update, context: CallbackContext):
@@ -704,7 +726,6 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
     chat_mode = query.data.split("|")[1]
 
     db.set_user_attribute(user_id, "current_chat_mode", chat_mode)
-    db.start_new_dialog(user_id)
 
     await context.bot.send_message(
         update.callback_query.message.chat.id,
@@ -765,7 +786,6 @@ async def set_settings_handle(update: Update, context: CallbackContext):
 
     _, model_key = query.data.split("|")
     db.set_user_attribute(user_id, "current_model", model_key)
-    db.start_new_dialog(user_id)
 
     text, reply_markup = get_settings_menu(user_id)
     try:
