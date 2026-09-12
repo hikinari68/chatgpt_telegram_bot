@@ -94,42 +94,44 @@ class ChatGPT:
             raise ValueError(f"Chat mode {chat_mode} is not supported")
 
         n_dialog_messages_before = len(dialog_messages)
-        answer = None
-        while answer is None:
-            try:
-                if config.models["info"][self.model]["type"] == "chat_completion":
-                    messages = self._generate_prompt_messages(
-                        message, dialog_messages, chat_mode)
+        try:
+            if config.models["info"][self.model]["type"] == "chat_completion":
+                messages = self._generate_prompt_messages(
+                    message, dialog_messages, chat_mode)
 
-                    r_gen = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        stream=True,
-                        **OPENAI_COMPLETION_OPTIONS
+                r_gen = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **OPENAI_COMPLETION_OPTIONS
+                )
+
+                async for r_item in r_gen:
+                    if len(r_item.choices) > 0:
+                        # Generating response, get delta
+                        n_input_tokens = 0
+                        n_output_tokens = 0
+                        delta = r_item.choices[0].delta
+                        response = getattr(delta, "content", "")
+                    else:
+                        # End of response, get usage data
+                        n_input_tokens = r_item.usage.prompt_tokens
+                        n_output_tokens = r_item.usage.completion_tokens
+                        response = ""
+
+                    n_first_dialog_messages_removed = (
+                        n_dialog_messages_before - len(dialog_messages)
                     )
 
-                    answer = ""
-                    async for r_item in r_gen:
-                        if len(r_item.choices) == 0:
-                            continue
-                        delta = r_item.choices[0].delta
+                    yield response, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
-                        if delta.content:
-                            answer = delta.content
-                            n_input_tokens, n_output_tokens = self._count_tokens_from_messages(
-                                messages, answer, model=self.model)
-                            n_first_dialog_messages_removed = 0
+        except BadRequestError as e:  # too many tokens
+            if len(dialog_messages) == 0:
+                raise e
 
-                            yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
-                answer = self._postprocess_answer(answer)
-
-            except BadRequestError as e:  # too many tokens
-                if len(dialog_messages) == 0:
-                    raise e
-
-                # forget first message in dialog_messages
-                dialog_messages = dialog_messages[1:]
+            # forget first message in dialog_messages
+            dialog_messages = dialog_messages[1:]
 
     async def send_vision_message(
         self,
@@ -183,46 +185,44 @@ class ChatGPT:
         image_buffer: BytesIO = None,
     ):
         n_dialog_messages_before = len(dialog_messages)
-        answer = None
-        while answer is None:
-            try:
-                if config.models["info"][self.model].get("vision", False):
-                    messages = self._generate_prompt_messages(
-                        message, dialog_messages, chat_mode, image_buffer
-                    )
+        try:
+            if config.models["info"][self.model].get("vision", False):
+                messages = self._generate_prompt_messages(
+                    message, dialog_messages, chat_mode, image_buffer
+                )
 
-                    r_gen = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        stream=True,
-                        **OPENAI_COMPLETION_OPTIONS,
-                    )
+                r_gen = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **OPENAI_COMPLETION_OPTIONS,
+                )
 
-                    answer = ""
-                    async for r_item in r_gen:
-                        if len(r_item.choices) == 0:
-                            continue
+                async for r_item in r_gen:
+                    if len(r_item.choices) > 0:
+                        # Generating response, get delta
+                        n_input_tokens = 0
+                        n_output_tokens = 0
                         delta = r_item.choices[0].delta
-                        if delta.content:
-                            answer = delta.content
-                            (
-                                n_input_tokens,
-                                n_output_tokens,
-                            ) = self._count_tokens_from_messages(
-                                messages, answer, model=self.model
-                            )
-                            n_first_dialog_messages_removed = (
-                                n_dialog_messages_before - len(dialog_messages)
-                            )
-                            yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+                        response = getattr(delta, "content", "")
+                    else:
+                        # End of response, get usage data
+                        n_input_tokens = r_item.usage.prompt_tokens
+                        n_output_tokens = r_item.usage.completion_tokens
+                        response = ""
 
-                answer = self._postprocess_answer(answer)
+                    n_first_dialog_messages_removed = (
+                        n_dialog_messages_before - len(dialog_messages)
+                    )
 
-            except BadRequestError as e:  # too many tokens
-                if len(dialog_messages) == 0:
-                    raise e
-                # forget first message in dialog_messages
-                dialog_messages = dialog_messages[1:]
+                    yield response, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
+        except BadRequestError as e:  # too many tokens
+            if len(dialog_messages) == 0:
+                raise e
+            # forget first message in dialog_messages
+            dialog_messages = dialog_messages[1:]
 
     def _encode_image(self, image_buffer: BytesIO) -> bytes:
         return base64.b64encode(image_buffer.read()).decode("utf-8")

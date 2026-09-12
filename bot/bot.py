@@ -83,15 +83,17 @@ async def stream_response(update: Update, context: CallbackContext, response_gen
         keepalive_timeout=25.0,
         cancel_clears_draft=True,
     ) as stream:
+        answer = ""
         async for gen_item in response_generator:
             (
-                answer,
+                delta,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed,
             ) = gen_item
-            stream.feed(answer)
+            stream.feed(delta)
+            answer += delta
 
-        return gen_item
+        return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
 
 async def group_stream_response(update: Update, context: CallbackContext, response_generator):
@@ -108,15 +110,17 @@ async def group_stream_response(update: Update, context: CallbackContext, respon
             mode="rich",
             interval=1
     ) as stream:
+        answer = ""
         async for gen_item in response_generator:
             (
-                answer,
+                delta,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed,
             ) = gen_item
-            stream.feed(answer)
+            stream.feed(delta)
+            answer += delta
 
-        return gen_item
+        return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
 
 def split_text_into_chunks(text, chunk_size):
@@ -436,7 +440,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 )
 
                 async def fake_gen():
-                    yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+                    yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
                 gen = fake_gen()
 
