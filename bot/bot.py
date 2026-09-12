@@ -33,7 +33,7 @@ import openai_utils
 
 import base64
 
-from telegramify_markdown.stream import DraftStream
+from telegramify_markdown.stream import DraftStream, EditStream
 
 # setup
 db = database.Database()
@@ -82,6 +82,32 @@ async def stream_response(update: Update, context: CallbackContext, response_gen
         thinking_delay=0.5,
         keepalive_timeout=25.0,
         cancel_clears_draft=True,
+    ) as stream:
+        async for gen_item in response_generator:
+            (
+                status,
+                answer,
+                (n_input_tokens, n_output_tokens),
+                n_first_dialog_messages_removed,
+            ) = gen_item
+            stream.feed(answer)
+
+        return gen_item
+
+
+async def group_stream_response(update: Update, context: CallbackContext, response_generator):
+    async def send_message(payload):
+        message = await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "message_thread_id": update.message.message_thread_id, "rich_message": payload.rich_message.to_dict()})
+        return message["message_id"]
+
+    async def edit_message(message_id, payload):
+        await context.bot.do_api_request(endpoint="edit_message_text", api_kwargs={"chat_id": update.message.chat_id, "message_id": message_id, "rich_message": payload.rich_message.to_dict()})
+
+    async with EditStream(
+            send_message=send_message,
+            edit_message=edit_message,
+            mode="rich",
+            interval=1
     ) as stream:
         async for gen_item in response_generator:
             (
@@ -286,11 +312,18 @@ async def _vision_message_handle_fn(
 
             gen = fake_gen()
 
-        (
-            status, answer,
-            (n_input_tokens, n_output_tokens),
-            n_first_dialog_messages_removed
-        ) = await stream_response(update, context, gen)
+        if update.message.chat.type == "private":
+            (
+                status, answer,
+                (n_input_tokens, n_output_tokens),
+                n_first_dialog_messages_removed
+            ) = await stream_response(update, context, gen)
+        else:
+            (
+                status, answer,
+                (n_input_tokens, n_output_tokens),
+                n_first_dialog_messages_removed
+            ) = await group_stream_response(update, context, gen)
 
         # update user data
         if buf is not None:
@@ -409,11 +442,18 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
                 gen = fake_gen()
 
-            (
-                status, answer,
-                (n_input_tokens, n_output_tokens),
-                n_first_dialog_messages_removed
-            ) = await stream_response(update, context, gen)
+            if update.message.chat.type == "private":
+                (
+                    status, answer,
+                    (n_input_tokens, n_output_tokens),
+                    n_first_dialog_messages_removed
+                ) = await stream_response(update, context, gen)
+            else:
+                (
+                    status, answer,
+                    (n_input_tokens, n_output_tokens),
+                    n_first_dialog_messages_removed
+                ) = await group_stream_response(update, context, gen)
 
             # update user data
             new_dialog_message = {"user": [
