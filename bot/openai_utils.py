@@ -115,7 +115,7 @@ class ChatGPT:
                         delta = r_item.choices[0].delta
 
                         if delta.content:
-                            answer += delta.content
+                            answer = delta.content
                             n_input_tokens, n_output_tokens = self._count_tokens_from_messages(
                                 messages, answer, model=self.model)
                             n_first_dialog_messages_removed = 0
@@ -211,7 +211,7 @@ class ChatGPT:
                             continue
                         delta = r_item.choices[0].delta
                         if delta.content:
-                            answer += delta.content
+                            answer = delta.content
                             (
                                 n_input_tokens,
                                 n_output_tokens,

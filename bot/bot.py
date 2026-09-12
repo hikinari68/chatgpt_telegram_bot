@@ -33,6 +33,8 @@ import openai_utils
 
 import base64
 
+from telegramify_markdown.stream import DraftStream
+
 # setup
 db = database.Database()
 logger = logging.getLogger(__name__)
@@ -221,17 +223,12 @@ async def _vision_message_handle_fn(
     n_input_tokens, n_output_tokens = 0, 0
 
     try:
-        # send placeholder message to user
-        placeholder_message = await update.message.reply_text("...")
         message = update.message.caption or update.message.text or ''
 
         # send typing action
         await update.message.chat.send_action(action="typing")
 
         dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
-        parse_mode = {"html": ParseMode.HTML, "markdown": ParseMode.MARKDOWN}[
-            config.chat_modes[chat_mode]["parse_mode"]
-        ]
 
         chatgpt_instance = openai_utils.ChatGPT(model=current_model)
         if config.enable_message_streaming:
@@ -261,41 +258,29 @@ async def _vision_message_handle_fn(
 
             gen = fake_gen()
 
-        prev_answer = ""
-        async for gen_item in gen:
-            (
-                status,
-                answer,
-                (n_input_tokens, n_output_tokens),
-                n_first_dialog_messages_removed,
-            ) = gen_item
+        async def send_draft(payload):
+            await context.bot.do_api_request(endpoint="sendRichMessageDraft", api_kwargs={"chat_id": update.message.chat_id, "draft_id": payload.draft_id, "rich_message": payload.rich_message.to_dict()})
 
-            answer = answer[:4096]  # telegram message limit
+        async def send_final(payload):
+            await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "rich_message": payload.rich_message.to_dict()})
 
-            # update only when 100 new symbols are ready
-            if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
-                continue
-
-            try:
-                await context.bot.edit_message_text(
+        async with DraftStream(
+            send_draft=send_draft,
+            send_final=send_final,
+            mode="rich",
+            interval=0.3,
+            thinking_delay=0.5,
+            keepalive_timeout=25.0,
+            cancel_clears_draft=True,
+        ) as stream:
+            async for gen_item in gen:
+                (
+                    status,
                     answer,
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    parse_mode=parse_mode,
-                )
-            except telegram.error.BadRequest as e:
-                if str(e).startswith("Message is not modified"):
-                    continue
-                else:
-                    await context.bot.edit_message_text(
-                        answer,
-                        chat_id=placeholder_message.chat_id,
-                        message_id=placeholder_message.message_id,
-                    )
-
-            await asyncio.sleep(0.01)  # wait a bit to avoid flooding
-
-            prev_answer = answer
+                    (n_input_tokens, n_output_tokens),
+                    n_first_dialog_messages_removed,
+                ) = gen_item
+                stream.feed(answer)
 
         # update user data
         if buf is not None:
@@ -389,9 +374,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
         n_input_tokens, n_output_tokens = 0, 0
 
         try:
-            # send placeholder message to user
-            placeholder_message = await update.message.reply_text("...")
-
             # send typing action
             await update.message.chat.send_action(action="typing")
 
@@ -400,10 +382,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 return
 
             dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
-            parse_mode = {
-                "html": ParseMode.HTML,
-                "markdown": ParseMode.MARKDOWN
-            }[config.chat_modes[chat_mode]["parse_mode"]]
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
             if config.enable_message_streaming:
@@ -421,29 +399,26 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
                 gen = fake_gen()
 
-            prev_answer = ""
+            async def send_draft(payload):
+                await context.bot.do_api_request(endpoint="sendRichMessageDraft", api_kwargs={"chat_id": update.message.chat_id, "draft_id": payload.draft_id, "rich_message": payload.rich_message.to_dict()})
 
-            async for gen_item in gen:
-                status, answer, (n_input_tokens,
-                                 n_output_tokens), n_first_dialog_messages_removed = gen_item
+            async def send_final(payload):
+                await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "rich_message": payload.rich_message.to_dict()})
 
-                answer = answer[:4096]  # telegram message limit
+            async with DraftStream(
+                send_draft=send_draft,
+                send_final=send_final,
+                mode="rich",
+                interval=2,
+                thinking_delay=0.5,
+                keepalive_timeout=25.0,
+                cancel_clears_draft=True,
+            ) as stream:
+                async for gen_item in gen:
+                    status, answer, (n_input_tokens,
+                                     n_output_tokens), n_first_dialog_messages_removed = gen_item
 
-                # update only when 100 new symbols are ready
-                if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
-                    continue
-
-                try:
-                    await context.bot.edit_message_text(answer, chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id, parse_mode=parse_mode)
-                except telegram.error.BadRequest as e:
-                    if str(e).startswith("Message is not modified"):
-                        continue
-                    else:
-                        await context.bot.edit_message_text(answer, chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id)
-
-                await asyncio.sleep(0.01)  # wait a bit to avoid flooding
-
-                prev_answer = answer
+                    stream.feed(answer)
 
             # update user data
             new_dialog_message = {"user": [
