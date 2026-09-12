@@ -16,7 +16,8 @@ telegram_token = config_yaml["telegram_token"]
 openai_api_key = config_yaml["openai_api_key"]
 openai_api_base = config_yaml.get("openai_api_base", None)
 openrouter_api_key = config_yaml.get("openrouter_api_key", None)
-openrouter_api_base = config_yaml.get("openrouter_api_base", "https://openrouter.ai/api/v1")
+openrouter_api_base = config_yaml.get(
+    "openrouter_api_base", "https://openrouter.ai/api/v1")
 allowed_telegram_usernames = config_yaml["allowed_telegram_usernames"]
 new_dialog_timeout = config_yaml["new_dialog_timeout"]
 enable_message_streaming = config_yaml.get("enable_message_streaming", True)
@@ -34,4 +35,5 @@ with open(config_dir / "models.yml", 'r') as f:
     models = yaml.safe_load(f)
 
 # files
-help_group_chat_video_path = Path(__file__).parent.parent.resolve() / "static" / "help_group_chat.mp4"
+help_group_chat_video_path = Path(
+    __file__).parent.parent.resolve() / "static" / "help_group_chat.mp4"

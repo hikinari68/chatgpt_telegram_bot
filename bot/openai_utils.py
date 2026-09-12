@@ -62,7 +62,8 @@ class ChatGPT:
         while answer is None:
             try:
                 if config.models["info"][self.model]["type"] == "chat_completion":
-                    messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+                    messages = self._generate_prompt_messages(
+                        message, dialog_messages, chat_mode)
 
                     r = await self._client.chat.completions.create(
                         model=self.model,
@@ -77,12 +78,14 @@ class ChatGPT:
                 n_input_tokens, n_output_tokens = r.usage.prompt_tokens, r.usage.completion_tokens
             except BadRequestError as e:  # too many tokens
                 if len(dialog_messages) == 0:
-                    raise ValueError("Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
+                    raise ValueError(
+                        "Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
 
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
-        n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
+        n_first_dialog_messages_removed = n_dialog_messages_before - \
+            len(dialog_messages)
 
         return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
@@ -95,7 +98,8 @@ class ChatGPT:
         while answer is None:
             try:
                 if config.models["info"][self.model]["type"] == "chat_completion":
-                    messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+                    messages = self._generate_prompt_messages(
+                        message, dialog_messages, chat_mode)
 
                     r_gen = await self._client.chat.completions.create(
                         model=self.model,
@@ -112,7 +116,8 @@ class ChatGPT:
 
                         if delta.content:
                             answer += delta.content
-                            n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer, model=self.model)
+                            n_input_tokens, n_output_tokens = self._count_tokens_from_messages(
+                                messages, answer, model=self.model)
                             n_first_dialog_messages_removed = 0
 
                             yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
@@ -126,7 +131,8 @@ class ChatGPT:
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
-        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed  # sending final answer
+        # sending final answer
+        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
     async def send_vision_message(
         self,
@@ -242,8 +248,10 @@ class ChatGPT:
         messages = [{"role": "system", "content": prompt}]
 
         for dialog_message in dialog_messages:
-            messages.append({"role": "user", "content": dialog_message["user"]})
-            messages.append({"role": "assistant", "content": dialog_message["bot"]})
+            messages.append(
+                {"role": "user", "content": dialog_message["user"]})
+            messages.append(
+                {"role": "assistant", "content": dialog_message["bot"]})
 
         if image_buffer is not None:
             messages.append(
@@ -256,10 +264,10 @@ class ChatGPT:
                         },
                         {
                             "type": "image_url",
-                            "image_url" : {
+                            "image_url": {
 
                                 "url": f"data:image/jpeg;base64,{self._encode_image(image_buffer)}",
-                                "detail":"high"
+                                "detail": "high"
                             }
                         }
                     ]
@@ -296,7 +304,8 @@ class ChatGPT:
                 for sub_message in message["content"]:
                     if "type" in sub_message:
                         if sub_message["type"] == "text":
-                            n_input_tokens += len(encoding.encode(sub_message["text"]))
+                            n_input_tokens += len(
+                                encoding.encode(sub_message["text"]))
                         elif sub_message["type"] == "image_url":
                             pass
             else:
@@ -305,7 +314,6 @@ class ChatGPT:
                         n_input_tokens += len(encoding.encode(message["text"]))
                     elif message["type"] == "image_url":
                         pass
-
 
         n_input_tokens += 2
 
