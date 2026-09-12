@@ -67,6 +67,34 @@ For example: "{bot_username} write a poem about Telegram"
 """
 
 
+async def stream_response(update: Update, context: CallbackContext, response_generator):
+    async def send_draft(payload):
+        await context.bot.do_api_request(endpoint="sendRichMessageDraft", api_kwargs={"chat_id": update.message.chat_id, "message_thread_id": update.message.message_thread_id, "draft_id": payload.draft_id, "rich_message": payload.rich_message.to_dict()})
+
+    async def send_final(payload):
+        await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "message_thread_id": update.message.message_thread_id, "rich_message": payload.rich_message.to_dict()})
+
+    async with DraftStream(
+        send_draft=send_draft,
+        send_final=send_final,
+        mode="rich",
+        interval=0.3,
+        thinking_delay=0.5,
+        keepalive_timeout=25.0,
+        cancel_clears_draft=True,
+    ) as stream:
+        async for gen_item in response_generator:
+            (
+                status,
+                answer,
+                (n_input_tokens, n_output_tokens),
+                n_first_dialog_messages_removed,
+            ) = gen_item
+            stream.feed(answer)
+
+        return gen_item
+
+
 def split_text_into_chunks(text, chunk_size):
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
@@ -258,29 +286,11 @@ async def _vision_message_handle_fn(
 
             gen = fake_gen()
 
-        async def send_draft(payload):
-            await context.bot.do_api_request(endpoint="sendRichMessageDraft", api_kwargs={"chat_id": update.message.chat_id, "draft_id": payload.draft_id, "rich_message": payload.rich_message.to_dict()})
-
-        async def send_final(payload):
-            await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "rich_message": payload.rich_message.to_dict()})
-
-        async with DraftStream(
-            send_draft=send_draft,
-            send_final=send_final,
-            mode="rich",
-            interval=0.3,
-            thinking_delay=0.5,
-            keepalive_timeout=25.0,
-            cancel_clears_draft=True,
-        ) as stream:
-            async for gen_item in gen:
-                (
-                    status,
-                    answer,
-                    (n_input_tokens, n_output_tokens),
-                    n_first_dialog_messages_removed,
-                ) = gen_item
-                stream.feed(answer)
+        (
+            status, answer,
+            (n_input_tokens, n_output_tokens),
+            n_first_dialog_messages_removed
+        ) = await stream_response(update, context, gen)
 
         # update user data
         if buf is not None:
@@ -399,26 +409,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
                 gen = fake_gen()
 
-            async def send_draft(payload):
-                await context.bot.do_api_request(endpoint="sendRichMessageDraft", api_kwargs={"chat_id": update.message.chat_id, "draft_id": payload.draft_id, "rich_message": payload.rich_message.to_dict()})
-
-            async def send_final(payload):
-                await context.bot.do_api_request(endpoint="sendRichMessage", api_kwargs={"chat_id": update.message.chat_id, "rich_message": payload.rich_message.to_dict()})
-
-            async with DraftStream(
-                send_draft=send_draft,
-                send_final=send_final,
-                mode="rich",
-                interval=2,
-                thinking_delay=0.5,
-                keepalive_timeout=25.0,
-                cancel_clears_draft=True,
-            ) as stream:
-                async for gen_item in gen:
-                    status, answer, (n_input_tokens,
-                                     n_output_tokens), n_first_dialog_messages_removed = gen_item
-
-                    stream.feed(answer)
+            (
+                status, answer,
+                (n_input_tokens, n_output_tokens),
+                n_first_dialog_messages_removed
+            ) = await stream_response(update, context, gen)
 
             # update user data
             new_dialog_message = {"user": [
@@ -570,7 +565,8 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.set_user_attribute(user_id, "current_model", "gpt-4o-mini")
+    db.set_user_attribute(user_id, "current_model",
+                          config.models["available_text_models"][0])
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
