@@ -25,7 +25,7 @@ from telegram.ext import (
     AIORateLimiter,
     filters
 )
-from telegram.constants import ParseMode, ChatAction
+from telegram.constants import ParseMode
 
 import config
 import database
@@ -85,7 +85,6 @@ async def stream_response(update: Update, context: CallbackContext, response_gen
     ) as stream:
         async for gen_item in response_generator:
             (
-                status,
                 answer,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed,
@@ -111,7 +110,6 @@ async def group_stream_response(update: Update, context: CallbackContext, respon
     ) as stream:
         async for gen_item in response_generator:
             (
-                status,
                 answer,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed,
@@ -305,7 +303,7 @@ async def _vision_message_handle_fn(
             )
 
             async def fake_gen():
-                yield "finished", answer, (
+                yield answer, (
                     n_input_tokens,
                     n_output_tokens,
                 ), n_first_dialog_messages_removed
@@ -314,13 +312,13 @@ async def _vision_message_handle_fn(
 
         if update.message.chat.type == "private":
             (
-                status, answer,
+                answer,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed
             ) = await stream_response(update, context, gen)
         else:
             (
-                status, answer,
+                answer,
                 (n_input_tokens, n_output_tokens),
                 n_first_dialog_messages_removed
             ) = await group_stream_response(update, context, gen)
@@ -444,13 +442,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
             if update.message.chat.type == "private":
                 (
-                    status, answer,
+                    answer,
                     (n_input_tokens, n_output_tokens),
                     n_first_dialog_messages_removed
                 ) = await stream_response(update, context, gen)
             else:
                 (
-                    status, answer,
+                    answer,
                     (n_input_tokens, n_output_tokens),
                     n_first_dialog_messages_removed
                 ) = await group_stream_response(update, context, gen)

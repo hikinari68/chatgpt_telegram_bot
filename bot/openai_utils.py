@@ -120,7 +120,7 @@ class ChatGPT:
                                 messages, answer, model=self.model)
                             n_first_dialog_messages_removed = 0
 
-                            yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+                            yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
                 answer = self._postprocess_answer(answer)
 
@@ -130,9 +130,6 @@ class ChatGPT:
 
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
-
-        # sending final answer
-        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
     async def send_vision_message(
         self,
@@ -176,11 +173,7 @@ class ChatGPT:
             dialog_messages
         )
 
-        return (
-            answer,
-            (n_input_tokens, n_output_tokens),
-            n_first_dialog_messages_removed,
-        )
+        return (answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed)
 
     async def send_vision_message_stream(
         self,
@@ -221,10 +214,7 @@ class ChatGPT:
                             n_first_dialog_messages_removed = (
                                 n_dialog_messages_before - len(dialog_messages)
                             )
-                            yield "not_finished", answer, (
-                                n_input_tokens,
-                                n_output_tokens,
-                            ), n_first_dialog_messages_removed
+                            yield answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
                 answer = self._postprocess_answer(answer)
 
@@ -233,11 +223,6 @@ class ChatGPT:
                     raise e
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
-
-        yield "finished", answer, (
-            n_input_tokens,
-            n_output_tokens,
-        ), n_first_dialog_messages_removed
 
     def _encode_image(self, image_buffer: BytesIO) -> bytes:
         return base64.b64encode(image_buffer.read()).decode("utf-8")
