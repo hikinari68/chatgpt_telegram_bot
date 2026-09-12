@@ -238,13 +238,10 @@ async def retry_handle(update: Update, context: CallbackContext):
     # last message was removed from the context
     db.set_dialog_messages(user_id, dialog_messages, dialog_id=None)
 
-    await message_handle(update, context, message=last_dialog_message["user"], use_new_dialog_timeout=False)
+    await message_handle(update, context, message=last_dialog_message["user"])
 
 
-async def _vision_message_handle_fn(
-    update: Update, context: CallbackContext, use_new_dialog_timeout: bool = True
-):
-    logger.info('_vision_message_handle_fn')
+async def _vision_message_handle_fn(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     current_model = db.get_user_attribute(user_id, "current_model")
 
@@ -257,11 +254,6 @@ async def _vision_message_handle_fn(
 
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    # new dialog timeout
-    if use_new_dialog_timeout:
-        if (datetime.now() - db.get_user_attribute(user_id, "last_interaction")).seconds > config.new_dialog_timeout and len(db.get_dialog_messages(user_id)) > 0:
-            db.start_new_dialog(user_id)
-            await update.message.reply_text(f"Starting new dialog due to timeout (<b>{config.chat_modes[chat_mode]['name']}</b> mode) ✅", parse_mode=ParseMode.HTML)
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     buf = None
@@ -378,7 +370,7 @@ async def unsupport_message_handle(update: Update, context: CallbackContext, mes
     return
 
 
-async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
+async def message_handle(update: Update, context: CallbackContext, message=None):
     # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
@@ -408,11 +400,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     current_model = db.get_user_attribute(user_id, "current_model")
 
     async def message_handle_fn():
-        # new dialog timeout
-        if use_new_dialog_timeout:
-            if (datetime.now() - db.get_user_attribute(user_id, "last_interaction")).seconds > config.new_dialog_timeout and len(db.get_dialog_messages(user_id)) > 0:
-                db.start_new_dialog(user_id)
-                await update.message.reply_text(f"Starting new dialog due to timeout (<b>{config.chat_modes[chat_mode]['name']}</b> mode) ✅", parse_mode=ParseMode.HTML)
         db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         # in case of CancelledError
@@ -502,10 +489,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 # fall back to a vision-capable default
                 current_model = "gpt-4o"
                 db.set_user_attribute(user_id, "current_model", "gpt-4o")
-            task = asyncio.create_task(
-                _vision_message_handle_fn(
-                    update, context, use_new_dialog_timeout=use_new_dialog_timeout)
-            )
+            task = asyncio.create_task(_vision_message_handle_fn(update, context)
+                                       )
         else:
             task = asyncio.create_task(
                 message_handle_fn()
