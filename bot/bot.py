@@ -138,7 +138,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
         )
 
     if user.id not in user_semaphores:
-        user_semaphores[user.id] = asyncio.Semaphore(1)
+        user_semaphores[user.id] = asyncio.Semaphore(2)
 
     if db.get_user_attribute(user.id, "current_model") is None:
         db.set_user_attribute(user.id, "current_model",
@@ -500,11 +500,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
             task = asyncio.create_task(_vision_message_handle_fn(update, context)
                                        )
         else:
-            task = asyncio.create_task(
-                message_handle_fn()
-            )
+            task = asyncio.create_task(message_handle_fn())
 
         user_tasks[user_id] = task
+
+        if update.message.is_topic_message:
+            task_title = asyncio.create_task(rename_topic(update, context))
+            await task_title
 
         try:
             await task
@@ -515,6 +517,37 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
         finally:
             if user_id in user_tasks:
                 del user_tasks[user_id]
+
+
+async def rename_topic(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+    message_thread_id = update.message.message_thread_id if update.message.is_topic_message else None
+    current_model = db.get_user_attribute(user_id, "current_model")
+    message = update.message.caption or update.message.text or ''
+
+    buf = None
+    if update.message.effective_attachment:
+        photo = update.message.effective_attachment[-1]
+        photo_file = await context.bot.get_file(photo.file_id)
+
+        # store file in memory, not on disk
+        buf = io.BytesIO()
+        await photo_file.download_to_memory(buf)
+        buf.name = "image.jpg"  # file extension is required
+        buf.seek(0)  # move cursor to the beginning of the buffer
+
+    try:
+        topic_titler_instance = openai_utils.ChatGPT(model=current_model)
+        dialog_messages = db.get_dialog_messages(
+            chat_id, message_thread_id)
+        if message_thread_id and len(dialog_messages) == 0:
+            topic_title = await topic_titler_instance.generate_topic_title(message, buf)
+            await context.bot.edit_forum_topic(chat_id, message_thread_id, topic_title)
+    except Exception as e:
+        error_text = f"Something went wrong when trying to generate topic title: {str(e)}"
+        logger.exception(e)
+        await update.message.reply_text(error_text)
 
 
 async def is_previous_message_not_answered_yet(update: Update, context: CallbackContext):

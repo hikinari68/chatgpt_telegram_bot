@@ -1,7 +1,9 @@
 import base64
 from io import BytesIO
+from typing import Optional
 import config
 import logging
+import json
 
 import tiktoken
 from openai import AsyncOpenAI, BadRequestError
@@ -59,11 +61,12 @@ class ChatGPT:
 
         n_dialog_messages_before = len(dialog_messages)
         answer = None
+        prompt = config.chat_modes[chat_mode]["prompt_start"]
         while answer is None:
             try:
                 if config.models["info"][self.model]["type"] == "chat_completion":
                     messages = self._generate_prompt_messages(
-                        message, dialog_messages, chat_mode)
+                        message, dialog_messages, prompt)
 
                     r = await self._client.chat.completions.create(
                         model=self.model,
@@ -94,10 +97,11 @@ class ChatGPT:
             raise ValueError(f"Chat mode {chat_mode} is not supported")
 
         n_dialog_messages_before = len(dialog_messages)
+        prompt = config.chat_modes[chat_mode]["prompt_start"]
         try:
             if config.models["info"][self.model]["type"] == "chat_completion":
                 messages = self._generate_prompt_messages(
-                    message, dialog_messages, chat_mode)
+                    message, dialog_messages, prompt)
 
                 r_gen = await self._client.chat.completions.create(
                     model=self.model,
@@ -142,11 +146,12 @@ class ChatGPT:
     ):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
+        prompt = config.chat_modes[chat_mode]["prompt_start"]
         while answer is None:
             try:
                 if config.models["info"][self.model].get("vision", False):
                     messages = self._generate_prompt_messages(
-                        message, dialog_messages, chat_mode, image_buffer
+                        message, dialog_messages, prompt, image_buffer
                     )
                     r = await self._client.chat.completions.create(
                         model=self.model,
@@ -182,13 +187,14 @@ class ChatGPT:
         message,
         dialog_messages=[],
         chat_mode="assistant",
-        image_buffer: BytesIO = None,
+        image_buffer: Optional[BytesIO] = None,
     ):
         n_dialog_messages_before = len(dialog_messages)
+        prompt = config.chat_modes[chat_mode]["prompt_start"]
         try:
             if config.models["info"][self.model].get("vision", False):
                 messages = self._generate_prompt_messages(
-                    message, dialog_messages, chat_mode, image_buffer
+                    message, dialog_messages, prompt, image_buffer
                 )
 
                 r_gen = await self._client.chat.completions.create(
@@ -224,12 +230,41 @@ class ChatGPT:
             # forget first message in dialog_messages
             dialog_messages = dialog_messages[1:]
 
+    async def generate_topic_title(self, message, image_buffer: Optional[BytesIO] = None):
+        json_schema = {
+            "name": "generate_topic_title",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "topic_title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "description": "A concise and descriptive topic title generated based on the provided image or message."
+                    }
+                },
+                "required": ["topic_title"],
+                "additionalProperties": False
+            }
+        }
+
+        messages = self._generate_prompt_messages(
+            message, [], "Generate a concise and descriptive topic title based on the provided image or message.", image_buffer)
+        r = await self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            response_format={"type": "json_schema",
+                             "json_schema": json_schema},
+            **OPENAI_COMPLETION_OPTIONS
+        )
+        topic_title = json.loads(r.choices[0].message.content)["topic_title"]
+        return topic_title
+
     def _encode_image(self, image_buffer: BytesIO) -> bytes:
         return base64.b64encode(image_buffer.read()).decode("utf-8")
 
-    def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
-        prompt = config.chat_modes[chat_mode]["prompt_start"]
-
+    def _generate_prompt_messages(self, message, dialog_messages, prompt, image_buffer: Optional[BytesIO] = None):
         messages = [{"role": "system", "content": prompt}]
 
         for dialog_message in dialog_messages:
