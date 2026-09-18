@@ -1,4 +1,4 @@
-available_text_models: ["gpt-4o-mini", "openai/gpt-5.5", "gpt-4o", "anthropic/claude-opus-4.8", "anthropic/claude-sonnet-latest", "anthropic/claude-haiku-latest"]
+available_text_models: ["auto", "gpt-5-3-mini", "gpt-5-5", "gpt-5-5-mini", "gpt-5-6", "gpt-5-6-mini"]
 
 info:
   gpt-4o:
@@ -28,6 +28,84 @@ info:
       Smart: 4
       Fast: 5
       Cheap: 5
+
+  auto:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: Auto
+    description: Automatically select an available ChatGPT model through the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 4
+      Fast: 4
+      Cheap: 3
+
+  gpt-5-3-mini:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: GPT-5.3 mini
+    description: GPT-5.3 mini exposed by the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 4
+      Fast: 5
+      Cheap: 4
+
+  gpt-5-5:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: GPT-5.5
+    description: GPT-5.5 exposed by the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 5
+      Fast: 3
+      Cheap: 3
+
+  gpt-5-5-mini:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: GPT-5.5 mini
+    description: GPT-5.5 mini exposed by the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 4
+      Fast: 5
+      Cheap: 4
+
+  gpt-5-6:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: GPT-5.6
+    description: GPT-5.6 exposed by the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 5
+      Fast: 3
+      Cheap: 3
+
+  gpt-5-6-mini:
+    type: chat_completion
+    provider: openai
+    vision: true
+    name: GPT-5.6 mini
+    description: GPT-5.6 mini exposed by the configured ChatGPT2API provider.
+    price_per_1000_input_tokens: 0
+    price_per_1000_output_tokens: 0
+    scores:
+      Smart: 4
+      Fast: 5
+      Cheap: 4
 
   openai/gpt-5.5:
     type: chat_completion

@@ -140,9 +140,12 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
     if user.id not in user_semaphores:
         user_semaphores[user.id] = asyncio.Semaphore(2)
 
-    if db.get_user_attribute(user.id, "current_model") is None:
-        db.set_user_attribute(user.id, "current_model",
-                              config.models["available_text_models"][0])
+    current_model = db.get_user_attribute(user.id, "current_model")
+    if (
+        current_model not in config.models["available_text_models"]
+        or current_model not in config.models["info"]
+    ):
+        db.set_user_attribute(user.id, "current_model", config.default_text_model)
 
     # back compatibility for n_used_tokens field
     n_used_tokens = db.get_user_attribute(user.id, "n_used_tokens")
@@ -250,7 +253,7 @@ async def _vision_message_handle_fn(update: Update, context: CallbackContext):
 
     if not config.models["info"][current_model].get("vision", False):
         await update.message.reply_text(
-            "🥲 Image understanding is only available for <b>vision-capable</b> models (e.g. GPT-4o, GPT-4o mini, GPT-5.5 or Claude). Please change your model in /settings",
+            "🥲 The selected model cannot read images. Please choose a vision-capable model in /settings",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -495,10 +498,16 @@ async def message_handle(update: Update, context: CallbackContext, message=None)
             if not model_supports_vision:
                 # a photo was sent but the selected model can't read images:
                 # fall back to a vision-capable default
-                current_model = "gpt-4o"
-                db.set_user_attribute(user_id, "current_model", "gpt-4o")
-            task = asyncio.create_task(_vision_message_handle_fn(update, context)
-                                       )
+                current_model = next(
+                    (
+                        model_key
+                        for model_key in config.models["available_text_models"]
+                        if config.models["info"].get(model_key, {}).get("vision", False)
+                    ),
+                    config.default_text_model,
+                )
+                db.set_user_attribute(user_id, "current_model", current_model)
+            task = asyncio.create_task(_vision_message_handle_fn(update, context))
         else:
             task = asyncio.create_task(message_handle_fn())
 
@@ -633,13 +642,9 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.set_user_attribute(user_id, "current_model",
-                          config.models["available_text_models"][0])
-
     if update.message.chat.type == "private":
-        forum_topic = await context.bot.create_forum_topic(update.message.chat_id, "New Chat")
-        message_thread_id = forum_topic.message_thread_id
-        db.start_new_dialog(user_id, update.message.chat_id, message_thread_id)
+        db.start_new_dialog(user_id, update.message.chat_id)
+        await update.message.reply_text("Starting new dialog ✅")
     elif update.message.chat.type == "supergroup":
         try:
             forum_topic = await context.bot.create_forum_topic(update.message.chat_id, "New Chat")
@@ -653,8 +658,10 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
         db.start_new_dialog(user_id, update.message.chat_id)
         await update.message.reply_text("Starting new dialog ✅")
 
-        chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
-        await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
+    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+    await update.message.reply_text(
+        f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML
+    )
 
 
 async def cancel_handle(update: Update, context: CallbackContext):
@@ -863,16 +870,30 @@ async def show_balance_handle(update: Update, context: CallbackContext):
         details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}$</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
 
     # image generation
-    image_generation_n_spent_dollars = config.models["info"][
-        "gpt-image-1"]["price_per_1_image"] * n_generated_images
+    image_model_info = next(
+        (
+            model_info
+            for model_info in config.models["info"].values()
+            if model_info.get("type") == "image"
+        ),
+        {"price_per_1_image": 0},
+    )
+    image_generation_n_spent_dollars = image_model_info["price_per_1_image"] * n_generated_images
     if n_generated_images != 0:
         details_text += f"- GPT Image (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
 
     total_n_spent_dollars += image_generation_n_spent_dollars
 
     # voice recognition
-    voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (
-        n_transcribed_seconds / 60)
+    audio_model_info = next(
+        (
+            model_info
+            for model_info in config.models["info"].values()
+            if model_info.get("type") == "audio"
+        ),
+        {"price_per_1_min": 0},
+    )
+    voice_recognition_n_spent_dollars = audio_model_info["price_per_1_min"] * (n_transcribed_seconds / 60)
     if n_transcribed_seconds != 0:
         details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 

@@ -44,7 +44,7 @@ class Database:
             "first_seen": datetime.now(),
 
             "current_chat_mode": "assistant",
-            "current_model": config.models["available_text_models"][0],
+            "current_model": config.default_text_model,
 
             "n_used_tokens": {},
 
@@ -109,11 +109,22 @@ class Database:
             sort=[("start_time", pymongo.DESCENDING)]
         )
 
-        return dialog_dict["messages"]
+        # Existing installations may not have a dialog for this chat/thread
+        # yet (or may still contain dialogs from the pre-thread schema).
+        return dialog_dict.get("messages", []) if dialog_dict else []
 
     def set_dialog_messages(self, dialog_messages: list, user_id: int, chat_id: int, message_thread_id: Optional[int] = None):
         self.dialog_collection.update_one(
             {"chat_id": chat_id, "message_thread_id": message_thread_id},
-            {"$set": {"messages": dialog_messages},
-                "$addToSet": {"participants": user_id}}
+            {
+                "$set": {"messages": dialog_messages},
+                "$addToSet": {"participants": user_id},
+                "$setOnInsert": {
+                    "_id": str(uuid.uuid4()),
+                    "chat_mode": self.get_user_attribute(user_id, "current_chat_mode"),
+                    "start_time": datetime.now(),
+                    "model": self.get_user_attribute(user_id, "current_model"),
+                },
+            },
+            upsert=True,
         )

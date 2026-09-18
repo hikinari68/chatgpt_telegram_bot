@@ -50,7 +50,8 @@ OPENAI_COMPLETION_OPTIONS = {
 
 
 class ChatGPT:
-    def __init__(self, model="gpt-4o-mini"):
+    def __init__(self, model=None):
+        model = model or config.default_text_model
         assert model in config.models["info"], f"Unknown model: {model}"
         self.model = model
         self._client = _get_client_for_model(model)
@@ -117,7 +118,7 @@ class ChatGPT:
                         n_input_tokens = 0
                         n_output_tokens = 0
                         delta = r_item.choices[0].delta
-                        response = getattr(delta, "content", "")
+                        response = getattr(delta, "content", "") or ""
                     else:
                         # End of response, get usage data
                         n_input_tokens = r_item.usage.prompt_tokens
@@ -211,7 +212,7 @@ class ChatGPT:
                         n_input_tokens = 0
                         n_output_tokens = 0
                         delta = r_item.choices[0].delta
-                        response = getattr(delta, "content", "")
+                        response = getattr(delta, "content", "") or ""
                     else:
                         # End of response, get usage data
                         n_input_tokens = r_item.usage.prompt_tokens
@@ -303,7 +304,8 @@ class ChatGPT:
         answer = answer.strip()
         return answer
 
-    def _count_tokens_from_messages(self, messages, answer, model="gpt-3.5-turbo"):
+    def _count_tokens_from_messages(self, messages, answer, model=None):
+        model = model or config.default_text_model
         try:
             encoding = tiktoken.encoding_for_model(model)
         except KeyError:
@@ -311,8 +313,8 @@ class ChatGPT:
             # via OpenRouter) fall back to a modern encoding for an estimate
             encoding = tiktoken.get_encoding("o200k_base")
 
-        # all currently supported chat models (gpt-4o, gpt-4o-mini, gpt-5.5,
-        # Claude, ...) use the same per-message overhead
+        # The configured chat models use the same per-message overhead for
+        # this estimate; unknown provider IDs already use o200k_base above.
         tokens_per_message = 3
         tokens_per_name = 1
 
@@ -344,14 +346,14 @@ class ChatGPT:
 
 
 async def transcribe_audio(audio_file) -> str:
-    r = await openai_client.audio.transcriptions.create(model="whisper-1", file=audio_file)
+    r = await openai_client.audio.transcriptions.create(model=config.audio_model, file=audio_file)
     return r.text or ""
 
 
 async def generate_images(prompt, n_images=1, size="1024x1024"):
-    # gpt-image-1 returns base64-encoded images (no URLs), so decode to bytes
+    # Image APIs return base64-encoded images for the configured provider.
     r = await openai_client.images.generate(
-        model="gpt-image-1", prompt=prompt, n=n_images, size=size
+        model=config.image_model, prompt=prompt, n=n_images, size=size
     )
     images = [base64.b64decode(item.b64_json) for item in r.data]
     return images

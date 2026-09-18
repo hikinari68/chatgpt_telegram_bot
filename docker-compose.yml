@@ -19,6 +19,9 @@ services:
     volumes:
       # live-mount config so edits apply on restart without rebuilding
       - ./config:/code/config
+    extra_hosts:
+      # Allows the bot container to reach chatgpt2api published on the host.
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mongo
 
